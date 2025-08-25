@@ -3,7 +3,6 @@ from pathlib import Path
 from dotenv import load_dotenv, set_key
 from stravalib.client import Client
 from stravalib.exc import AccessUnauthorized
-from typing import Any, NoReturn
 import logging
 from tenacity import (
     stop_after_attempt,
@@ -27,22 +26,26 @@ class StravaAuthenticator:
 
         if self.STRAVA_ACCESS_TOKEN is not None:
             self.client.access_token = self.STRAVA_ACCESS_TOKEN
+            logger.debug("Access token set on client")
         
         self.STRAVA_EXPIRES_AT = os.getenv("STRAVA_EXPIRES_AT")
         if self.STRAVA_EXPIRES_AT is not None:
             self.client.token_expires = int(self.STRAVA_EXPIRES_AT)
+            logger.debug(f"Token expiry set: {self.STRAVA_EXPIRES_AT}")
 
         self.STRAVA_REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN")
         if self.STRAVA_REFRESH_TOKEN is not None:
             self.client.refresh_token = self.STRAVA_REFRESH_TOKEN
+            logger.debug("Refresh token configured")
 
         self.retrier = Retrying(
-            stop=stop_after_attempt(5),
+            stop=stop_after_attempt(3),
             wait=wait_exponential(multiplier=1, min=2, max=10),
-            # Retry on network errors, but let HTTP errors pass to the handler
-            retry=retry_if_exception_type(AccessUnauthorized),
+            retry=retry_if_exception_type((AccessUnauthorized)),
             reraise=True,
-            before_sleep=lambda retry_state: logger.info(f"Tenacity: Retrying transient error (attempt {retry_state.attempt_number})..."),
+            before_sleep=lambda retry_state: logger.warning(
+                f"Retrying authentication (attempt {retry_state.attempt_number}/3)..."
+            ),
         )
 
     def authenticate(self) -> Client:
@@ -52,7 +55,8 @@ class StravaAuthenticator:
                 for attempt in self.retrier:
                     with attempt:
                         athlete = self.client.get_athlete()
-                        logger.info(f"Successfully authenticated as {athlete.firstname} {athlete.lastname}")
+                        logger.info(f"✓ Successfully authenticated as {athlete.firstname} {athlete.lastname}")
+                        logger.info(f"✓ Athlete ID: {athlete.id}")
                         return self.client
             except AccessUnauthorized as e:
                 self.refresh_token()
@@ -68,6 +72,7 @@ class StravaAuthenticator:
     def refresh_token(self):
         """Refresh the access token using refresh token."""
         try:
+            logger.info("Attempting to manually refresh token")
             if self.STRAVA_CLIENT_ID is None or self.STRAVA_CLIENT_SECRET is None or self.STRAVA_REFRESH_TOKEN is None:
                 raise
 
@@ -80,6 +85,7 @@ class StravaAuthenticator:
             # Update tokens (in production, save these securely)
             STRAVA_ACCESS_TOKEN = token_response['access_token']
             STRAVA_REFRESH_TOKEN = token_response['refresh_token']
+            STRAVA_EXPIRES_AT = token_response["expires_at"]
 
             # The path to your .env file
             dotenv_path = Path(".env")
@@ -88,8 +94,9 @@ class StravaAuthenticator:
 
             set_key(dotenv_path, "STRAVA_ACCESS_TOKEN", STRAVA_ACCESS_TOKEN)
             set_key(dotenv_path, "STRAVA_REFRESH_TOKEN", STRAVA_REFRESH_TOKEN)
+            set_key(dotenv_path, "STRAVA_EXPIRES_AT", str(STRAVA_EXPIRES_AT))
             
-            logger.info("Successfully refreshed access token: ", STRAVA_ACCESS_TOKEN)
+            logger.info(f"Successfully refreshed access token: {STRAVA_ACCESS_TOKEN}")
             return token_response
             
         except Exception as e:
