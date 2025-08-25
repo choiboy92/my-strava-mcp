@@ -2,12 +2,13 @@ from fastmcp import FastMCP, Context
 from stravalib.model import DetailedActivity
 from ..data.data_handler import StravaDataHandler
 from ..auth.strava_auth import StravaAuthenticator
+import logging
 
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     name="My Strava MCP Server",
-    instructions="This server provides operations and data access for my Strava activities",
-    log_level="INFO"
+    instructions="This server provides operations and data access for my Strava activities"
 )
 
 auth = StravaAuthenticator()
@@ -17,6 +18,8 @@ handler = StravaDataHandler(client)
 @mcp.tool
 async def greet(name: str, ctx: Context) -> str:
     await ctx.info("greet was called")
+    print("Greet is printed")
+    logger.info("greet is logged")
     return f"Hello, {name}!"
 
 @mcp.tool
